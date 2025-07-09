@@ -1,0 +1,17 @@
+# Python bytecode
+*.pyc
+__pycache__/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# PyInstaller files
+build/
+dist/
+*.spec
+
+# Other common OS files
+.DS_Store # macOS
+Thumbs.db # Windows
