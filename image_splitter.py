@@ -4,7 +4,7 @@ import sys
 import cv2
 import numpy as np
 
-def find_vertical_black_line_center(image_path, black_threshold=25, min_line_width=5, min_line_density=0.95, search_middle_fraction=0.2):
+def find_vertical_black_line_center(image_path, black_threshold=25, min_line_width=5, min_line_density=0.9, search_middle_fraction=0.2):
     """
     Attempts to find the center of a prominent vertical black line in an image,
     restricting the search to the middle fifth of the photo's width.
@@ -23,12 +23,13 @@ def find_vertical_black_line_center(image_path, black_threshold=25, min_line_wid
         # Load image with OpenCV
         img_cv = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         if img_cv is None:
-            print(f"Warning: Could not read image {image_path} with OpenCV.")
+            # This warning is useful for debugging, but might be too much for the user.
+            # print(f"Warning: Could not read image {image_path} with OpenCV. Skipping for line detection.")
             return None
 
         height, width = img_cv.shape
 
-        # Define the search region for the line
+        # Define the search region for the line (middle fifth)
         search_width = int(width * search_middle_fraction)
         search_start_x = (width - search_width) // 2
         search_end_x = search_start_x + search_width
@@ -48,48 +49,13 @@ def find_vertical_black_line_center(image_path, black_threshold=25, min_line_wid
         column_densities = column_sums / height
 
         # Find potential line regions within the search_start_x and search_end_x
-        potential_line_centers = []
-        is_in_line = False
-        current_line_start = -1
-
-        for x in range(search_start_x, search_end_x):
-            if column_densities[x] >= min_line_density:
-                if not is_in_line:
-                    current_line_start = x
-                    is_in_line = True
-            else:
-                if is_in_line:
-                    current_line_end = x - 1
-                    line_width = current_line_end - current_line_start + 1
-                    if line_width >= min_line_width:
-                        potential_line_centers.append((current_line_start + current_line_end) // 2)
-                    is_in_line = False
-        
-        # Check if a line extends to the end of the search region
-        if is_in_line:
-            current_line_end = search_end_x - 1
-            line_width = current_line_end - current_line_start + 1
-            if line_width >= min_line_width:
-                potential_line_centers.append((current_line_start + current_line_end) // 2)
-
-        if not potential_line_centers:
-            # print(f"No clear black line found in the middle fifth of {os.path.basename(image_path)}.")
-            return None
-        
-        # If multiple lines are found, take the one that's densest or widest.
-        # For simplicity, let's take the first one found in the search area for now,
-        # assuming a single prominent line. If a more sophisticated choice is needed,
-        # we'd iterate through potential_line_starts/ends and evaluate them.
-        
-        # For now, let's just return the center of the first valid line found.
-        # If there are multiple, the one closer to the exact middle of the *search region* might be best.
-        # Let's refine to pick the "best" line, e.g., the widest one in the search area
         best_line_center = None
         max_line_width_found = 0
 
-        # Re-iterate to find the widest line within the search region
         is_in_line = False
         current_line_start = -1
+        
+        # Iterate only within the defined search region
         for x in range(search_start_x, search_end_x):
             if column_densities[x] >= min_line_density:
                 if not is_in_line:
@@ -105,7 +71,7 @@ def find_vertical_black_line_center(image_path, black_threshold=25, min_line_wid
                             best_line_center = (current_line_start + current_line_end) // 2
                     is_in_line = False
         
-        # Final check if line extends to the end of search region
+        # Final check if a line extends to the end of the search region
         if is_in_line:
             current_line_end = search_end_x - 1
             line_width = current_line_end - current_line_start + 1
@@ -128,64 +94,98 @@ def split_jpeg_in_half_by_line(folder_path):
     it falls back to splitting exactly in half.
     """
     if not os.path.isdir(folder_path):
-        print(f"Error: Folder '{folder_path}' not found.")
+        print(f"Error: The folder '{folder_path}' was not found. Please ensure it exists and you typed the name correctly.")
         input("Press Enter to exit.")
         return
 
-    output_folder = os.path.join(folder_path, "split_images_by_line")
+    output_folder = os.path.join(folder_path, "split_images_output") # Changed output folder name slightly
     os.makedirs(output_folder, exist_ok=True)
 
     processed_count = 0
-    for filename in os.listdir(folder_path):
-        if filename.lower().endswith(('.jpg', '.jpeg')):
-            file_path = os.path.join(folder_path, filename)
-            try:
-                with Image.open(file_path) as img:
-                    width, height = img.size
-
-                    # Pass the search_middle_fraction parameter here
-                    split_x = find_vertical_black_line_center(file_path, search_middle_fraction=0.2) # 0.2 for middle fifth
-                    
-                    if split_x is None:
-                        # Fallback to exact center if no line detected in the middle fifth
-                        split_x = width // 2
-                        print(f"No clear line found in the middle fifth of '{filename}'. Splitting at geometric center ({split_x}).")
-                    else:
-                        print(f"Detected line in '{filename}' at x-coordinate: {split_x}. Splitting there.")
-
-
-                    # Crop the left half
-                    # Ensure the split_x doesn't cause negative width for left_half or zero width for right_half
-                    split_x = max(1, min(split_x, width - 1)) # Ensure split_x is within valid bounds (not 0 or width)
-
-                    left_half = img.crop((0, 0, split_x, height))
-                    right_half = img.crop((split_x, 0, width, height))
-
-                    base_name, ext = os.path.splitext(filename)
-
-                    left_half_name = f"{base_name}(2){ext}"
-                    right_half_name = f"{base_name}(1){ext}"
-
-                    left_half.save(os.path.join(output_folder, left_half_name))
-                    right_half.save(os.path.join(output_folder, right_half_name))
-
-                    print(f"Saved '{left_half_name}' and '{right_half_name}'.")
-                    processed_count += 1
-
-            except Exception as e:
-                print(f"Could not process '{filename}': {e}")
+    skipped_count = 0
     
-    if processed_count > 0:
-        print(f"\nFinished splitting {processed_count} images. All split images are saved in the '{output_folder}' folder.")
-    else:
-        print("\nNo JPEG images found in this folder to split.")
+    # Get list of files *before* looping, to avoid issues if files are added/removed during processing
+    # and to exclude the output folder itself
+    files_to_process = [f for f in os.listdir(folder_path) if f.lower().endswith(('.jpg', '.jpeg'))]
+
+    if not files_to_process:
+        print(f"\nNo JPEG images found in the folder '{folder_path}' to split.")
+        input("Press Enter to exit.")
+        return
+
+    for filename in files_to_process:
+        file_path = os.path.join(folder_path, filename)
+        try:
+            with Image.open(file_path) as img:
+                width, height = img.size
+
+                split_x = find_vertical_black_line_center(file_path, search_middle_fraction=0.2)
+                
+                if split_x is None:
+                    # Fallback to exact center if no line detected in the middle fifth
+                    split_x = width // 2
+                    print(f"No clear line found in the middle fifth of '{filename}'. Splitting at geometric center ({split_x}).")
+                else:
+                    print(f"Detected line in '{filename}' at x-coordinate: {split_x}. Splitting there.")
+
+
+                # Ensure the split_x doesn't cause zero width for halves
+                # It must be at least 1 and at most width-1
+                split_x = max(1, min(split_x, width - 1)) 
+
+                left_half = img.crop((0, 0, split_x, height))
+                right_half = img.crop((split_x, 0, width, height))
+
+                base_name, ext = os.path.splitext(filename)
+
+                left_half_name = f"{base_name}(1){ext}"
+                right_half_name = f"{base_name}(2){ext}"
+
+                left_half.save(os.path.join(output_folder, left_half_name))
+                right_half.save(os.path.join(output_folder, right_half_name))
+
+                print(f"Saved '{left_half_name}' and '{right_half_name}'.")
+                processed_count += 1
+
+        except Exception as e:
+            print(f"Could not process '{filename}'. Error: {e}")
+            skipped_count += 1
+    
+    print(f"\n--- Processing Complete ---")
+    print(f"Successfully split {processed_count} images.")
+    if skipped_count > 0:
+        print(f"Skipped {skipped_count} images due to errors.")
+    print(f"All split images are saved in the '{output_folder}' folder.")
     
     input("Press Enter to exit.")
 
 # --- How to use the script ---
 if __name__ == "__main__":
-    jpeg_folder = os.path.dirname(os.path.abspath(sys.argv[0]))
+    # Get the directory where the executable is located
+    exe_directory = os.path.dirname(os.path.abspath(sys.argv[0]))
     
-    print(f"Looking for JPEGs in: {jpeg_folder}")
-    print("Splitting images now...")
-    split_jpeg_in_half_by_line(jpeg_folder)
+    print("-------------------------------------------------------------------")
+    print("  JPEG Photo Splitter")
+    print("  This tool splits JPEG photos in half, looking for a dividing line.")
+    print("-------------------------------------------------------------------")
+    
+    # Prompt user for the folder name
+    # We use a loop to ensure the folder actually exists
+    while True:
+        subfolder_name = input("\nEnter the NAME of the folder containing your photos (e.g., 'MyPhotos'):\n> ").strip()
+        
+        if not subfolder_name:
+            print("Folder name cannot be empty. Please try again.")
+            continue
+
+        photos_folder_path = os.path.join(exe_directory, subfolder_name)
+        
+        if os.path.isdir(photos_folder_path):
+            print(f"\nFound folder: '{photos_folder_path}'")
+            break
+        else:
+            print(f"Error: Folder '{subfolder_name}' not found inside '{exe_directory}'.")
+            print("Please make sure the photos folder is in the SAME location as this application.")
+            
+    print("\nStarting image splitting process...")
+    split_jpeg_in_half_by_line(photos_folder_path)
