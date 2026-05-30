@@ -8,23 +8,11 @@ def find_vertical_black_line_center(image_path, black_threshold=25, min_line_wid
     """
     Attempts to find the center of a prominent vertical black line in an image,
     restricting the search to the middle fifth of the photo's width.
-
-    Args:
-        image_path (str): Path to the image file.
-        black_threshold (int): Pixels with intensity below this are considered "black" (0-255).
-        min_line_width (int): Minimum width (in pixels) for a continuous black region to be considered a line.
-        min_line_density (float): Minimum proportion of black pixels in a column to be considered part of the line (0.0 to 1.0).
-        search_middle_fraction (float): The fraction of the image width to search in the middle (e.g., 0.2 for middle fifth).
-
-    Returns:
-        int or None: The x-coordinate of the center of the detected black line, or None if no line is found.
     """
     try:
         # Load image with OpenCV
         img_cv = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         if img_cv is None:
-            # This warning is useful for debugging, but might be too much for the user.
-            # print(f"Warning: Could not read image {image_path} with OpenCV. Skipping for line detection.")
             return None
 
         height, width = img_cv.shape
@@ -39,16 +27,15 @@ def find_vertical_black_line_center(image_path, black_threshold=25, min_line_wid
         search_end_x = min(width, search_end_x)
 
         # Apply a binary threshold to isolate black pixels
-        # Pixels <= black_threshold become 0 (black), others become 255 (white)
         _, binary_img = cv2.threshold(img_cv, black_threshold, 255, cv2.THRESH_BINARY)
         
-        # Sum black pixels vertically (column-wise) specifically in the search region
-        column_sums = np.sum(binary_img == 0, axis=0) # Sum 0s (black pixels)
+        # Sum black pixels vertically across the ENTIRE image width to match index sizing
+        column_sums = np.sum(binary_img == 0, axis=0) 
 
         # Normalize column sums by height to get density
         column_densities = column_sums / height
 
-        # Find potential line regions within the search_start_x and search_end_x
+        # Find potential line regions within the search bounds
         best_line_center = None
         max_line_width_found = 0
 
@@ -87,25 +74,22 @@ def find_vertical_black_line_center(image_path, black_threshold=25, min_line_wid
         return None
 
 
-def split_jpeg_in_half_by_line(folder_path):
+def split_jpeg_in_half_by_line(folder_path, flip_180=False):
     """
-    Splits each JPEG image in a given folder vertically based on a detected black line
-    in the middle fifth of the photo. If no line is found in that region,
-    it falls back to splitting exactly in half.
+    Splits each JPEG image in a given folder vertically based on a detected black line.
+    Optionally rotates the split output images 180 degrees.
     """
     if not os.path.isdir(folder_path):
-        print(f"Error: The folder '{folder_path}' was not found. Please ensure it exists and you typed the name correctly.")
+        print(f"Error: The folder '{folder_path}' was not found.")
         input("Press Enter to exit.")
         return
 
-    output_folder = os.path.join(folder_path, "split_images_output") # Changed output folder name slightly
+    output_folder = os.path.join(folder_path, "split_images_output")
     os.makedirs(output_folder, exist_ok=True)
 
     processed_count = 0
     skipped_count = 0
     
-    # Get list of files *before* looping, to avoid issues if files are added/removed during processing
-    # and to exclude the output folder itself
     files_to_process = [f for f in os.listdir(folder_path) if f.lower().endswith(('.jpg', '.jpeg'))]
 
     if not files_to_process:
@@ -122,22 +106,22 @@ def split_jpeg_in_half_by_line(folder_path):
                 split_x = find_vertical_black_line_center(file_path, search_middle_fraction=0.2)
                 
                 if split_x is None:
-                    # Fallback to exact center if no line detected in the middle fifth
                     split_x = width // 2
-                    print(f"No clear line found in the middle fifth of '{filename}'. Splitting at geometric center ({split_x}).")
+                    print(f"No clear line found in '{filename}'. Splitting at geometric center ({split_x}).")
                 else:
                     print(f"Detected line in '{filename}' at x-coordinate: {split_x}. Splitting there.")
 
-
-                # Ensure the split_x doesn't cause zero width for halves
-                # It must be at least 1 and at most width-1
                 split_x = max(1, min(split_x, width - 1)) 
 
                 left_half = img.crop((0, 0, split_x, height))
                 right_half = img.crop((split_x, 0, width, height))
 
-                base_name, ext = os.path.splitext(filename)
+                # Apply 180-degree rotation if requested by the user
+                if flip_180:
+                    left_half = left_half.rotate(180)
+                    right_half = right_half.rotate(180)
 
+                base_name, ext = os.path.splitext(filename)
                 left_half_name = f"{base_name}(1){ext}"
                 right_half_name = f"{base_name}(2){ext}"
 
@@ -151,7 +135,7 @@ def split_jpeg_in_half_by_line(folder_path):
             print(f"Could not process '{filename}'. Error: {e}")
             skipped_count += 1
     
-    print(f"\n--- Processing Complete ---")
+    print("\n--- Processing Complete ---")
     print(f"Successfully split {processed_count} images.")
     if skipped_count > 0:
         print(f"Skipped {skipped_count} images due to errors.")
@@ -159,18 +143,16 @@ def split_jpeg_in_half_by_line(folder_path):
     
     input("Press Enter to exit.")
 
-# --- How to use the script ---
+
 if __name__ == "__main__":
-    # Get the directory where the executable is located
     exe_directory = os.path.dirname(os.path.abspath(sys.argv[0]))
     
     print("-------------------------------------------------------------------")
-    print("  JPEG Photo Splitter")
+    print("  JPEG Photo Splitter & Rotator")
     print("  This tool splits JPEG photos in half, looking for a dividing line.")
     print("-------------------------------------------------------------------")
     
-    # Prompt user for the folder name
-    # We use a loop to ensure the folder actually exists
+    # 1. Ask user for the folder name
     while True:
         subfolder_name = input("\nEnter the NAME of the folder containing your photos (e.g., 'MyPhotos'):\n> ").strip()
         
@@ -187,5 +169,19 @@ if __name__ == "__main__":
             print(f"Error: Folder '{subfolder_name}' not found inside '{exe_directory}'.")
             print("Please make sure the photos folder is in the SAME location as this application.")
             
+    # 2. Ask user if they want to flip the images 180 degrees
+    while True:
+        flip_input = input("\nDo you want to rotate every split photo 180 degrees? (yes/no or y/n):\n> ").strip().lower()
+        if flip_input in ['yes', 'y']:
+            rotate_images = True
+            print("Rotation enabled: Images will be flipped 180 degrees.")
+            break
+        elif flip_input in ['no', 'n']:
+            rotate_images = False
+            print("Rotation disabled: Images will maintain original orientation.")
+            break
+        else:
+            print("Invalid input. Please type 'yes' or 'no'.")
+
     print("\nStarting image splitting process...")
-    split_jpeg_in_half_by_line(photos_folder_path)
+    split_jpeg_in_half_by_line(photos_folder_path, flip_180=rotate_images)
