@@ -13,7 +13,7 @@ dist/
 *.spec
 
 # Other common OS files
-.DS_Store # macOS
-Thumbs.db # Windows
+.DS_Store
+Thumbs.db
 
 test_images
